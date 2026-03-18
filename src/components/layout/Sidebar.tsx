@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { CalendarDays, Upload, Send, Clock, ChevronDown, Plus } from 'lucide-react';
+import { CalendarDays, Upload, Send, Clock, ChevronDown, Plus, LogOut } from 'lucide-react';
 import type { ClientProfile } from '../../types/client';
+import { APP_VERSION } from '../../constants/version';
 
 const NAV_ITEMS = [
   { to: '/', icon: CalendarDays, label: 'Plan' },
@@ -15,14 +16,17 @@ interface SidebarProps {
   activeClient: ClientProfile | null;
   onSwitchClient: (id: string) => void;
   onAddClient: () => void;
+  userName?: string;
+  onLogout?: () => void;
+  onNavClick?: () => void;
 }
 
-export default function Sidebar({ clients, activeClient, onSwitchClient, onAddClient }: SidebarProps) {
+export default function Sidebar({ clients, activeClient, onSwitchClient, onAddClient, userName, onLogout, onNavClick }: SidebarProps) {
   const [showClientMenu, setShowClientMenu] = useState(false);
   const hasMultipleClients = clients.length > 1;
 
   return (
-    <aside className="w-64 bg-white border-r border-warm-beige/50 flex flex-col min-h-screen">
+    <aside className="w-64 bg-white border-r border-warm-beige/50 flex flex-col h-screen">
       {/* Client header / switcher */}
       <div className="p-6 border-b border-warm-beige/50">
         {hasMultipleClients ? (
@@ -83,6 +87,7 @@ export default function Sidebar({ clients, activeClient, onSwitchClient, onAddCl
           <NavLink
             key={to}
             to={to}
+            onClick={onNavClick}
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
                 isActive
@@ -97,9 +102,19 @@ export default function Sidebar({ clients, activeClient, onSwitchClient, onAddCl
         ))}
       </nav>
 
+      {/* User + logout + version footer */}
       <div className="p-4 border-t border-warm-beige/50">
-        <p className="text-xs text-soft-gray">
-          {activeClient?.business.website || 'Social Media Manager'}
+        {userName && onLogout && (
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm text-charcoal hover:bg-red-50 hover:text-red-600 transition-colors group mb-3"
+          >
+            <span className="truncate">{userName}</span>
+            <LogOut size={16} className="text-soft-gray group-hover:text-red-500 shrink-0 ml-2" />
+          </button>
+        )}
+        <p className="text-xs text-soft-gray text-center">
+          Social Agency v{APP_VERSION}
         </p>
       </div>
     </aside>

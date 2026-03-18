@@ -113,12 +113,12 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
   return (
     <div className="min-h-screen bg-off-white flex flex-col">
       {/* Progress bar */}
-      <div className="bg-white border-b border-warm-beige/50 px-8 py-4">
+      <div className="bg-white border-b border-warm-beige/50 px-4 sm:px-8 py-4">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-center justify-between mb-3">
-            <h1 className="font-display text-2xl text-charcoal">Set Up Your Account</h1>
+            <h1 className="font-display text-xl sm:text-2xl text-charcoal">Set Up Your Account</h1>
             <span className="text-sm text-soft-gray">
-              Step {step + 1} of {STEPS.length}
+              {step + 1}/{STEPS.length}
             </span>
           </div>
           <div className="flex gap-1">
@@ -131,7 +131,7 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
               />
             ))}
           </div>
-          <div className="flex justify-between mt-2">
+          <div className="hidden sm:flex justify-between mt-2">
             {STEPS.map((s, i) => (
               <span
                 key={s.label}
@@ -143,18 +143,19 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
               </span>
             ))}
           </div>
+          <p className="sm:hidden text-xs text-dusty-rose font-medium mt-2">{STEPS[step].label}</p>
         </div>
       </div>
 
       {/* Step content */}
-      <div className="flex-1 px-8 py-8">
+      <div className="flex-1 px-4 sm:px-8 py-6 sm:py-8">
         <div className="max-w-3xl mx-auto">
           <StepComponent draft={draft} updateDraft={updateDraft} />
         </div>
       </div>
 
       {/* Navigation */}
-      <div className="bg-white border-t border-warm-beige/50 px-8 py-4">
+      <div className="bg-white border-t border-warm-beige/50 px-4 sm:px-8 py-4">
         <div className="max-w-3xl mx-auto flex justify-between">
           <button
             onClick={() => setStep((s) => s - 1)}

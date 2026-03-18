@@ -18,7 +18,7 @@ export default function DayCard({ day, onUpdatePost }: DayCardProps) {
       {/* Day header — always visible */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-6 py-4 hover:bg-off-white/50 transition-colors"
+        className="w-full flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-off-white/50 transition-colors"
       >
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 rounded-full bg-dusty-rose/10 flex items-center justify-center">
@@ -39,7 +39,7 @@ export default function DayCard({ day, onUpdatePost }: DayCardProps) {
 
       {/* Expanded content */}
       {expanded && (
-        <div className="px-6 pb-6 space-y-4 border-t border-warm-beige/20">
+        <div className="px-4 sm:px-6 pb-4 sm:pb-6 space-y-4 border-t border-warm-beige/20">
           <div className="pt-4">
             <ShotListView shotList={day.shotList} />
           </div>

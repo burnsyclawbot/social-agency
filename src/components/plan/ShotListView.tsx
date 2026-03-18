@@ -13,7 +13,7 @@ export default function ShotListView({ shotList }: ShotListViewProps) {
         <h4 className="text-sm font-semibold text-charcoal">Shot List</h4>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
         <Field label="Content type" value={shotList.contentType} />
         <Field label="Subject" value={shotList.subject} />
         <Field label="Framing" value={shotList.framing} />

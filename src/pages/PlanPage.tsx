@@ -11,13 +11,14 @@ import { validatePost } from '../lib/validation';
 
 interface PlanPageProps {
   client: ClientProfile | null;
+  onPlanCreated?: (planId: string) => void;
 }
 
 function generatePostId(dayNumber: number, platform: string) {
   return `day${dayNumber}-${platform}`;
 }
 
-export default function PlanPage({ client }: PlanPageProps) {
+export default function PlanPage({ client, onPlanCreated }: PlanPageProps) {
   const [topic, setTopic] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +82,7 @@ export default function PlanPage({ client }: PlanPageProps) {
       };
 
       setPlan(contentPlan);
+      onPlanCreated?.(planId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate plan');
     } finally {
@@ -133,7 +135,7 @@ export default function PlanPage({ client }: PlanPageProps) {
           ) : undefined
         }
       />
-      <div className="flex-1 p-8 overflow-y-auto">
+      <div className="flex-1 p-4 sm:p-8 overflow-y-auto">
         {!plan ? (
           <div className="max-w-2xl mx-auto">
             <div className="bg-white rounded-xl p-6 shadow-sm border border-warm-beige/30">
@@ -187,7 +189,7 @@ export default function PlanPage({ client }: PlanPageProps) {
             )}
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto">
+          <div className="max-w-4xl mx-auto w-full">
             <WeekOverview plan={plan} onUpdatePost={handleUpdatePost} />
           </div>
         )}
