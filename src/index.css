@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dusty-rose: #c79ea6;
+  --color-warm-beige: #dbcab6;
+  --color-off-white: #f5f0eb;
+  --color-soft-gray: #8a8a8a;
+  --color-charcoal: #333333;
+
+  --font-display: "Cormorant Garamond", serif;
+  --font-sans: "DM Sans", sans-serif;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-off-white);
+  color: var(--color-charcoal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100svh;
+}
