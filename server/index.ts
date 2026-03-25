@@ -84,6 +84,20 @@ async function startServer() {
 
   app.use(express.json({ limit: "2mb" }));
 
+  // SECURITY: CORS — restrict to our own origin
+  const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || "https://socialagency.stratagengroup.com";
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin === ALLOWED_ORIGIN || !origin) {
+      res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Max-Age", "86400");
+    }
+    if (req.method === "OPTIONS") { res.status(204).end(); return; }
+    next();
+  });
+
   // SECURITY: Security headers
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -91,6 +105,7 @@ async function startServer() {
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.s3.amazonaws.com https://*.blob.core.windows.net https://delivery-bfl.ai blob: data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'");
     next();
   });
 
@@ -104,7 +119,7 @@ async function startServer() {
     },
   });
   const S3_BUCKET = process.env.AWS_S3_BUCKET || "social-agency-media";
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
   // ============================================================
   // AUTH ROUTES (public)
@@ -139,7 +154,7 @@ async function startServer() {
 
     createUser(userId, email.toLowerCase().trim(), name.trim(), passwordHash);
 
-    const token = jwt.sign({ userId, email: email.toLowerCase().trim() }, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ userId, email: email.toLowerCase().trim() }, JWT_SECRET, { expiresIn: "24h" });
     res.json({ token, user: { id: userId, email: email.toLowerCase().trim(), name: name.trim() } });
   });
 
@@ -169,7 +184,7 @@ async function startServer() {
       return;
     }
 
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: "24h" });
     res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
   });
 
@@ -328,14 +343,14 @@ async function startServer() {
       try {
         planData = JSON.parse(text);
       } catch {
-        res.status(422).json({ error: "Failed to parse AI response as JSON", raw: textBlock.text });
+        res.status(422).json({ error: "Failed to parse AI response as JSON" });
         return;
       }
 
       res.json(planData);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      res.status(500).json({ error: message });
+      console.error("generate-plan error:", err instanceof Error ? err.message : err);
+      res.status(500).json({ error: "Content plan generation failed" });
     }
   });
 
@@ -467,8 +482,8 @@ async function startServer() {
 
       res.json({ accounts: enriched });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      res.status(500).json({ error: message });
+      console.error("blotato-proxy error:", err instanceof Error ? err.message : err);
+      res.status(500).json({ error: "Failed to fetch Blotato accounts" });
     }
   });
 
@@ -501,11 +516,14 @@ async function startServer() {
       }
     }
 
+    // SECURITY: Sanitize path components to prevent traversal
+    const safeClientId = clientId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const safePlanId = planId.replace(/[^a-zA-Z0-9_-]/g, "_");
+
     const results = [];
     for (const file of files) {
-      // SECURITY: Sanitize filename to prevent path traversal
       const safeName = sanitizeFilename(file.originalname);
-      const key = `${clientId}/${planId}/${safeName}`;
+      const key = `${safeClientId}/${safePlanId}/${safeName}`;
       const contentType = file.mimetype || "application/octet-stream";
 
       await s3.send(new PutObjectCommand({
@@ -541,7 +559,10 @@ async function startServer() {
       }
     }
 
-    const prefix = `${clientId}/${planId}/`;
+    // SECURITY: Sanitize path components
+    const safeClientId = clientId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const safePlanId = planId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const prefix = `${safeClientId}/${safePlanId}/`;
 
     const response = await s3.send(new ListObjectsV2Command({
       Bucket: S3_BUCKET,
@@ -659,6 +680,20 @@ async function startServer() {
           return;
         }
 
+        // SECURITY: Validate reference URLs are HTTPS from our S3 bucket
+        for (const refUrl of refUrls) {
+          try {
+            const parsed = new URL(refUrl);
+            if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".s3.amazonaws.com")) {
+              res.status(400).json({ error: "Reference photos must be hosted on our media server" });
+              return;
+            }
+          } catch {
+            res.status(400).json({ error: "Invalid reference photo URL" });
+            return;
+          }
+        }
+
         // Kontext uses aspect_ratio string instead of width/height
         const arMap: Record<string, string> = {
           "square": "1:1",
@@ -698,7 +733,11 @@ async function startServer() {
 
         const submitData = await submitRes.json() as { id: string; polling_url?: string };
         const taskId = submitData.id;
-        const pollingUrl = submitData.polling_url || `https://api.bfl.ai/v1/get_result?id=${taskId}`;
+        // SECURITY: Only trust polling URLs from bfl.ai to prevent SSRF
+        let pollingUrl = `https://api.bfl.ai/v1/get_result?id=${taskId}`;
+        if (submitData.polling_url) {
+          try { const pu = new URL(submitData.polling_url); if (pu.hostname.endsWith("bfl.ai") && pu.protocol === "https:") pollingUrl = submitData.polling_url; } catch {}
+        }
 
         // Poll for result (max 90 seconds — Kontext can be slower)
         let imageUrl: string | null = null;
@@ -773,7 +812,11 @@ async function startServer() {
 
         const submitData = await submitRes.json() as { id: string; polling_url?: string };
         const taskId = submitData.id;
-        const pollingUrl = submitData.polling_url || `https://api.bfl.ai/v1/get_result?id=${taskId}`;
+        // SECURITY: Only trust polling URLs from bfl.ai to prevent SSRF
+        let pollingUrl = `https://api.bfl.ai/v1/get_result?id=${taskId}`;
+        if (submitData.polling_url) {
+          try { const pu = new URL(submitData.polling_url); if (pu.hostname.endsWith("bfl.ai") && pu.protocol === "https:") pollingUrl = submitData.polling_url; } catch {}
+        }
 
         // Step 2: Poll for result (max 60 seconds)
         let imageUrl: string | null = null;
@@ -812,8 +855,8 @@ async function startServer() {
         res.json({ imageUrl });
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      res.status(500).json({ error: message });
+      console.error("generate-image error:", err instanceof Error ? err.message : err);
+      res.status(500).json({ error: "Image generation failed" });
     }
   });
 
@@ -854,8 +897,8 @@ async function startServer() {
     }
 
     try {
-      // Fetch the image from AI provider's temporary URL
-      const imgRes = await fetch(imageUrl);
+      // Fetch the image from AI provider's temporary URL (no redirects to prevent SSRF bypass)
+      const imgRes = await fetch(imageUrl, { redirect: "error" });
       if (!imgRes.ok) throw new Error("Failed to fetch generated image");
 
       const buffer = Buffer.from(await imgRes.arrayBuffer());
@@ -873,8 +916,8 @@ async function startServer() {
       const url = `https://${S3_BUCKET}.s3.amazonaws.com/${key}`;
       res.json({ url, key });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      res.status(500).json({ error: message });
+      console.error("save-generated error:", err instanceof Error ? err.message : err);
+      res.status(500).json({ error: "Failed to save generated image" });
     }
   });
 
