@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import Anthropic from "@anthropic-ai/sdk";
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
@@ -17,7 +18,45 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const JWT_SECRET = process.env.JWT_SECRET || "social-agency-secret-change-me";
+// SECURITY: Require JWT_SECRET from environment — no hardcoded fallback
+if (!process.env.JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is required");
+  process.exit(1);
+}
+const JWT_SECRET: string = process.env.JWT_SECRET;
+
+// SECURITY: Simple in-memory rate limiter for auth endpoints
+const authAttempts = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX = 15; // max attempts per window
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    authAttempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= RATE_LIMIT_MAX;
+}
+
+// Clean up rate limit map every 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of authAttempts) {
+    if (now > entry.resetAt) authAttempts.delete(ip);
+  }
+}, 30 * 60 * 1000);
+
+// SECURITY: Sanitize filenames — strip path traversal and dangerous characters
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/\.\./g, "")
+    .replace(/[/\\]/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 255);
+}
 
 function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
   const header = req.headers.authorization;
@@ -45,6 +84,16 @@ async function startServer() {
 
   app.use(express.json({ limit: "2mb" }));
 
+  // SECURITY: Security headers
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    next();
+  });
+
   // --- S3 setup ---
 
   const s3 = new S3Client({
@@ -62,6 +111,13 @@ async function startServer() {
   // ============================================================
 
   app.post("/api/auth/register", async (req, res) => {
+    // SECURITY: Rate limit registration
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    if (!checkRateLimit(`register:${ip}`)) {
+      res.status(429).json({ error: "Too many attempts. Try again later." });
+      return;
+    }
+
     const { email, name, password } = req.body;
     if (!email || !name || !password) {
       res.status(400).json({ error: "Email, name, and password are required" });
@@ -79,7 +135,7 @@ async function startServer() {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const userId = `user_${Date.now()}`;
+    const userId = `user_${crypto.randomUUID()}`;
 
     createUser(userId, email.toLowerCase().trim(), name.trim(), passwordHash);
 
@@ -88,6 +144,13 @@ async function startServer() {
   });
 
   app.post("/api/auth/login", async (req, res) => {
+    // SECURITY: Rate limit login attempts
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    if (!checkRateLimit(`login:${ip}`)) {
+      res.status(429).json({ error: "Too many login attempts. Try again later." });
+      return;
+    }
+
     const { email, password } = req.body;
     if (!email || !password) {
       res.status(400).json({ error: "Email and password are required" });
@@ -147,7 +210,7 @@ async function startServer() {
     const userId = getUserId(req);
     const { accountType, business, brand, voice, compliance, platforms, blotatoApiKey } = req.body;
 
-    const clientId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const clientId = `client_${crypto.randomUUID()}`;
     const client = createClient({
       id: clientId,
       userId,
@@ -288,6 +351,14 @@ async function startServer() {
       res.status(400).json({ error: "clientId query param required" });
       return;
     }
+
+    // SECURITY: Validate client ownership
+    const client = getClientById(clientId);
+    if (!client || client.userId !== userId) {
+      res.status(404).json({ error: "Client not found" });
+      return;
+    }
+
     const plans = getPlansByClient(clientId, userId);
     res.json({ plans });
   });
@@ -308,6 +379,23 @@ async function startServer() {
     const userId = getUserId(req);
     const id = req.params.id as string;
     const { clientId, topic, generatedAt, startDate, endDate, status, days } = req.body;
+
+    // SECURITY: Validate ownership of existing plan before update
+    const existing = getPlanById(id);
+    if (existing && existing.userId !== userId) {
+      res.status(404).json({ error: "Plan not found" });
+      return;
+    }
+
+    // SECURITY: Validate client ownership
+    if (clientId) {
+      const client = getClientById(clientId);
+      if (!client || client.userId !== userId) {
+        res.status(404).json({ error: "Client not found" });
+        return;
+      }
+    }
+
     const plan = savePlan({
       id,
       clientId,
@@ -400,12 +488,24 @@ async function startServer() {
       return;
     }
 
+    const userId = getUserId(req);
     const clientId = req.body.clientId || "default";
     const planId = req.body.planId || "unassigned";
 
+    // SECURITY: Validate client ownership if a real clientId is provided
+    if (clientId !== "default") {
+      const client = getClientById(clientId);
+      if (!client || client.userId !== userId) {
+        res.status(404).json({ error: "Client not found" });
+        return;
+      }
+    }
+
     const results = [];
     for (const file of files) {
-      const key = `${clientId}/${planId}/${file.originalname}`;
+      // SECURITY: Sanitize filename to prevent path traversal
+      const safeName = sanitizeFilename(file.originalname);
+      const key = `${clientId}/${planId}/${safeName}`;
       const contentType = file.mimetype || "application/octet-stream";
 
       await s3.send(new PutObjectCommand({
@@ -428,8 +528,19 @@ async function startServer() {
       return;
     }
 
+    const userId = getUserId(req);
     const clientId = (req.query.clientId as string) || "default";
     const planId = (req.query.planId as string) || "unassigned";
+
+    // SECURITY: Validate client ownership
+    if (clientId !== "default") {
+      const client = getClientById(clientId);
+      if (!client || client.userId !== userId) {
+        res.status(404).json({ error: "Client not found" });
+        return;
+      }
+    }
+
     const prefix = `${clientId}/${planId}/`;
 
     const response = await s3.send(new ListObjectsV2Command({
@@ -454,11 +565,29 @@ async function startServer() {
       return;
     }
 
+    const userId = getUserId(req);
     const key = req.query.key as string;
     if (!key) {
       res.status(400).json({ error: "Missing key parameter" });
       return;
     }
+
+    // SECURITY: Validate key belongs to a client owned by this user
+    const keyClientId = key.split("/")[0];
+    if (keyClientId && keyClientId !== "default") {
+      const client = getClientById(keyClientId);
+      if (!client || client.userId !== userId) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+    }
+
+    // SECURITY: Prevent path traversal in S3 key
+    if (key.includes("..")) {
+      res.status(400).json({ error: "Invalid key" });
+      return;
+    }
+
     await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key }));
     res.json({ deleted: key });
   });
@@ -695,19 +824,44 @@ async function startServer() {
       return;
     }
 
+    const userId = getUserId(req);
     const { imageUrl, clientId, dayNumber } = req.body;
     if (!imageUrl) {
       res.status(400).json({ error: "Missing imageUrl" });
       return;
     }
 
+    // SECURITY: Validate client ownership
+    if (clientId && clientId !== "default") {
+      const client = getClientById(clientId);
+      if (!client || client.userId !== userId) {
+        res.status(404).json({ error: "Client not found" });
+        return;
+      }
+    }
+
+    // SECURITY: Restrict fetch to known AI image hosts to prevent SSRF
+    const allowedHosts = ["oaidalleapiprodscus.blob.core.windows.net", "delivery-bfl.ai", "bfl.ai", "replicate.delivery"];
     try {
-      // Fetch the image from OpenAI's temporary URL
+      const parsedUrl = new URL(imageUrl);
+      if (!allowedHosts.some(h => parsedUrl.hostname.endsWith(h))) {
+        res.status(400).json({ error: "Image URL must be from a supported AI provider" });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: "Invalid image URL" });
+      return;
+    }
+
+    try {
+      // Fetch the image from AI provider's temporary URL
       const imgRes = await fetch(imageUrl);
       if (!imgRes.ok) throw new Error("Failed to fetch generated image");
 
       const buffer = Buffer.from(await imgRes.arrayBuffer());
-      const key = `${clientId || "default"}/ai-generated/day${dayNumber || "x"}-${Date.now()}.png`;
+      const safeClientId = (clientId || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const safeDayNum = String(dayNumber || "x").replace(/[^a-zA-Z0-9]/g, "");
+      const key = `${safeClientId}/ai-generated/day${safeDayNum}-${crypto.randomUUID()}.png`;
 
       await s3.send(new PutObjectCommand({
         Bucket: S3_BUCKET,
