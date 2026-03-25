@@ -19,6 +19,19 @@ export interface ClientProfile {
 
   // Step 5: Platform Setup
   platforms: PlatformSetup;
+
+  // Blotato API key for publishing
+  blotatoApiKey?: string;
+
+  // Reference photos for AI character consistency (Flux Kontext)
+  referencePhotos?: ReferencePhoto[];
+}
+
+export interface ReferencePhoto {
+  id: string;
+  name: string;
+  url: string;
+  uploadedAt: string;
 }
 
 export interface BusinessInfo {

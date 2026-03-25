@@ -1,61 +1,74 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ClientProfile } from '../types/client';
+import { apiFetch } from '../lib/api';
 
-const STORAGE_KEY = 'spa_social_clients';
-const ACTIVE_KEY = 'spa_social_active_client';
+export function useClientStore(isAuthenticated: boolean) {
+  const [clients, setClients] = useState<ClientProfile[]>([]);
+  const [activeClientId, setActiveClientId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
-function loadClients(): ClientProfile[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
+  // Fetch clients from server only when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setClients([]);
+      setActiveClientId(null);
+      setLoaded(false);
+      return;
+    }
 
-function saveClients(clients: ClientProfile[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(clients));
-}
-
-function loadActiveId(): string | null {
-  return localStorage.getItem(ACTIVE_KEY);
-}
-
-function saveActiveId(id: string | null) {
-  if (id) localStorage.setItem(ACTIVE_KEY, id);
-  else localStorage.removeItem(ACTIVE_KEY);
-}
-
-export function useClientStore() {
-  const [clients, setClients] = useState<ClientProfile[]>(loadClients);
-  const [activeClientId, setActiveClientId] = useState<string | null>(loadActiveId);
-
-  useEffect(() => saveClients(clients), [clients]);
-  useEffect(() => saveActiveId(activeClientId), [activeClientId]);
+    apiFetch<{ clients: ClientProfile[]; activeClientId: string | null }>('/clients')
+      .then((data) => {
+        setClients(data.clients);
+        setActiveClientId(data.activeClientId);
+      })
+      .catch(() => {
+        // Server error — leave empty
+      })
+      .finally(() => setLoaded(true));
+  }, [isAuthenticated]);
 
   const activeClient = clients.find((c) => c.id === activeClientId) ?? null;
 
-  const addClient = useCallback((client: ClientProfile) => {
-    setClients((prev) => [...prev, client]);
-    setActiveClientId(client.id);
+  const addClient = useCallback(async (client: ClientProfile) => {
+    const data = await apiFetch<{ client: ClientProfile }>('/clients', {
+      method: 'POST',
+      body: JSON.stringify({
+        accountType: client.accountType,
+        business: client.business,
+        brand: client.brand,
+        voice: client.voice,
+        compliance: client.compliance,
+        platforms: client.platforms,
+        blotatoApiKey: client.blotatoApiKey,
+      }),
+    });
+    setClients((prev) => [...prev, data.client]);
+    setActiveClientId(data.client.id);
+    return data.client;
   }, []);
 
-  const updateClient = useCallback((id: string, updates: Partial<ClientProfile>) => {
-    setClients((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
-      )
-    );
+  const updateClient = useCallback(async (id: string, updates: Partial<ClientProfile>) => {
+    const data = await apiFetch<{ client: ClientProfile }>(`/clients/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+    setClients((prev) => prev.map((c) => (c.id === id ? data.client : c)));
+    return data.client;
   }, []);
 
-  const removeClient = useCallback((id: string) => {
+  const removeClient = useCallback(async (id: string) => {
+    await apiFetch(`/clients/${id}`, { method: 'DELETE' });
     setClients((prev) => prev.filter((c) => c.id !== id));
     if (activeClientId === id) {
       setActiveClientId(null);
     }
   }, [activeClientId]);
 
-  const switchClient = useCallback((id: string) => {
+  const switchClient = useCallback(async (id: string) => {
+    await apiFetch('/clients/active', {
+      method: 'POST',
+      body: JSON.stringify({ clientId: id }),
+    });
     setActiveClientId(id);
   }, []);
 
@@ -68,6 +81,7 @@ export function useClientStore() {
     activeClientId,
     hasClients,
     isAgency,
+    loaded,
     addClient,
     updateClient,
     removeClient,

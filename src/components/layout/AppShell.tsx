@@ -11,9 +11,11 @@ interface AppShellProps {
   onAddClient: () => void;
   userName?: string;
   onLogout?: () => void;
+  guardNavigation?: () => boolean;
+  onSaveBeforeNav?: () => Promise<void>;
 }
 
-export default function AppShell({ clients, activeClient, onSwitchClient, onAddClient, userName, onLogout }: AppShellProps) {
+export default function AppShell({ clients, activeClient, onSwitchClient, onAddClient, userName, onLogout, guardNavigation, onSaveBeforeNav }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -39,6 +41,8 @@ export default function AppShell({ clients, activeClient, onSwitchClient, onAddC
           userName={userName}
           onLogout={onLogout}
           onNavClick={() => setSidebarOpen(false)}
+          guardNavigation={guardNavigation}
+          onSaveBeforeNav={onSaveBeforeNav}
         />
       </div>
 

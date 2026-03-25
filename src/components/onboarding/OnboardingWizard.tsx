@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { ClientProfile } from '../../types/client';
 import AccountTypeStep from './steps/AccountTypeStep';
 import BusinessInfoStep from './steps/BusinessInfoStep';
@@ -7,20 +7,26 @@ import BrandVoiceStep from './steps/BrandVoiceStep';
 import ComplianceStep from './steps/ComplianceStep';
 import PlatformSetupStep from './steps/PlatformSetupStep';
 import ReviewStep from './steps/ReviewStep';
-import { ChevronLeft, ChevronRight, Check } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, LogOut, X } from 'lucide-react';
+import { APP_VERSION } from '../../constants/version';
 
-const STEPS = [
-  { label: 'Account Type', component: AccountTypeStep },
-  { label: 'Business Info', component: BusinessInfoStep },
-  { label: 'Brand Identity', component: BrandIdentityStep },
-  { label: 'Brand Voice', component: BrandVoiceStep },
-  { label: 'Compliance', component: ComplianceStep },
-  { label: 'Platforms', component: PlatformSetupStep },
-  { label: 'Review', component: ReviewStep },
+const ALL_STEPS = [
+  { label: 'Account Type', component: AccountTypeStep, key: 'accountType' },
+  { label: 'Business Info', component: BusinessInfoStep, key: 'business' },
+  { label: 'Brand Identity', component: BrandIdentityStep, key: 'brand' },
+  { label: 'Brand Voice', component: BrandVoiceStep, key: 'voice' },
+  { label: 'Compliance', component: ComplianceStep, key: 'compliance' },
+  { label: 'Platforms', component: PlatformSetupStep, key: 'platforms' },
+  { label: 'Review', component: ReviewStep, key: 'review' },
 ];
 
 interface OnboardingWizardProps {
-  onComplete: (client: ClientProfile) => void;
+  onComplete: (client: ClientProfile) => void | Promise<void>;
+  onCancel?: () => void;
+  userName?: string;
+  onLogout?: () => void;
+  /** When true, skip account type step (adding client to existing agency) */
+  isAddingClient?: boolean;
 }
 
 function generateId() {
@@ -84,17 +90,32 @@ const EMPTY_DRAFT: Partial<ClientProfile> = {
   },
 };
 
-export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
+export default function OnboardingWizard({ onComplete, onCancel, userName, onLogout, isAddingClient }: OnboardingWizardProps) {
+  const steps = useMemo(() => {
+    if (isAddingClient) {
+      return ALL_STEPS.filter((s) => s.key !== 'accountType');
+    }
+    return ALL_STEPS;
+  }, [isAddingClient]);
+
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<Partial<ClientProfile>>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<Partial<ClientProfile>>(() => {
+    if (isAddingClient) {
+      return { ...EMPTY_DRAFT, accountType: 'agency' };
+    }
+    return EMPTY_DRAFT;
+  });
 
   const updateDraft = (updates: Partial<ClientProfile>) => {
     setDraft((prev) => ({ ...prev, ...updates }));
   };
 
-  const StepComponent = STEPS[step].component;
+  const StepComponent = steps[step].component;
 
-  const handleComplete = () => {
+  const [saving, setSaving] = useState(false);
+
+  const handleComplete = async () => {
+    setSaving(true);
     const now = new Date().toISOString();
     const client: ClientProfile = {
       ...(draft as ClientProfile),
@@ -103,12 +124,13 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
       updatedAt: now,
       onboardingComplete: true,
     };
-    onComplete(client);
+    await onComplete(client);
+    setSaving(false);
   };
 
-  const canProceed = step < STEPS.length - 1;
+  const canProceed = step < steps.length - 1;
   const canGoBack = step > 0;
-  const isLastStep = step === STEPS.length - 1;
+  const isLastStep = step === steps.length - 1;
 
   return (
     <div className="min-h-screen bg-off-white flex flex-col">
@@ -116,13 +138,37 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
       <div className="bg-white border-b border-warm-beige/50 px-4 sm:px-8 py-4">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-center justify-between mb-3">
-            <h1 className="font-display text-xl sm:text-2xl text-charcoal">Set Up Your Account</h1>
-            <span className="text-sm text-soft-gray">
-              {step + 1}/{STEPS.length}
-            </span>
+            <h1 className="font-display text-xl sm:text-2xl text-charcoal">
+              {isAddingClient ? 'Add New Client' : 'Set Up Your Account'}
+            </h1>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-soft-gray">
+                {step + 1}/{steps.length}
+              </span>
+              {isAddingClient && onCancel && (
+                <button
+                  onClick={onCancel}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-soft-gray hover:text-charcoal hover:bg-off-white rounded-lg transition-colors"
+                  title="Cancel"
+                >
+                  <X size={14} />
+                  <span className="hidden sm:inline">Cancel</span>
+                </button>
+              )}
+              {userName && onLogout && !isAddingClient && (
+                <button
+                  onClick={onLogout}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-soft-gray hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut size={14} />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex gap-1">
-            {STEPS.map((s, i) => (
+            {steps.map((s, i) => (
               <div
                 key={s.label}
                 className={`h-1.5 flex-1 rounded-full transition-colors ${
@@ -132,7 +178,7 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
             ))}
           </div>
           <div className="hidden sm:flex justify-between mt-2">
-            {STEPS.map((s, i) => (
+            {steps.map((s, i) => (
               <span
                 key={s.label}
                 className={`text-xs ${
@@ -143,7 +189,7 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
               </span>
             ))}
           </div>
-          <p className="sm:hidden text-xs text-dusty-rose font-medium mt-2">{STEPS[step].label}</p>
+          <p className="sm:hidden text-xs text-dusty-rose font-medium mt-2">{steps[step].label}</p>
         </div>
       </div>
 
@@ -169,10 +215,11 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
           {isLastStep ? (
             <button
               onClick={handleComplete}
-              className="flex items-center gap-2 px-6 py-2.5 text-sm bg-dusty-rose text-white rounded-lg font-medium hover:bg-dusty-rose/90 transition-colors"
+              disabled={saving}
+              className="flex items-center gap-2 px-6 py-2.5 text-sm bg-dusty-rose text-white rounded-lg font-medium hover:bg-dusty-rose/90 disabled:opacity-50 transition-colors"
             >
               <Check size={16} />
-              Complete Setup
+              {saving ? 'Saving...' : isAddingClient ? 'Add Client' : 'Complete Setup'}
             </button>
           ) : (
             <button
@@ -185,6 +232,7 @@ export default function OnboardingWizard({ onComplete }: OnboardingWizardProps) 
             </button>
           )}
         </div>
+        <p className="text-center text-xs text-soft-gray/60 mt-2">v{APP_VERSION}</p>
       </div>
     </div>
   );

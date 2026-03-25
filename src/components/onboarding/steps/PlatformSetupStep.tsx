@@ -104,6 +104,21 @@ export default function PlatformSetupStep({ draft, updateDraft }: StepProps) {
         })}
       </div>
 
+      {/* Blotato API Key */}
+      <div className="mt-8">
+        <h3 className="text-sm font-semibold text-charcoal mb-2">Blotato API Key</h3>
+        <p className="text-xs text-soft-gray mb-3">
+          Enter your Blotato API key to enable publishing. You can find this in your Blotato dashboard under Settings &rarr; API.
+        </p>
+        <input
+          type="text"
+          value={draft.blotatoApiKey || ''}
+          onChange={(e) => updateDraft({ blotatoApiKey: e.target.value })}
+          placeholder="blotato_api_..."
+          className="w-full px-3 py-2 border border-warm-beige/50 rounded-lg text-sm text-charcoal placeholder-soft-gray/60 focus:outline-none focus:ring-2 focus:ring-dusty-rose/30 font-mono"
+        />
+      </div>
+
       <div className="mt-6 p-4 bg-warm-beige/20 rounded-lg">
         <p className="text-xs text-soft-gray">
           <strong className="text-charcoal">Note:</strong> After completing setup, you'll need to connect your social media accounts through Blotato to enable publishing. The platform will guide you through this process.

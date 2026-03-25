@@ -16,6 +16,17 @@ export interface Day {
   posts: Post[];
 }
 
+export type ShotStatus = 'planned' | 'taken' | 'uploaded';
+
+export interface ShotMedia {
+  id: string;
+  originalName: string;
+  displayName: string;
+  url: string;
+  type: 'image' | 'video';
+  size?: number;
+}
+
 export interface ShotList {
   contentType: string;
   subject: string;
@@ -26,6 +37,8 @@ export interface ShotList {
   platformFormat: string;
   fileNames: string[];
   notes: string;
+  status: ShotStatus;
+  media: ShotMedia[];
 }
 
 export interface Post {

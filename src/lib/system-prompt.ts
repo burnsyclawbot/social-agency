@@ -8,7 +8,7 @@ export function buildSystemPrompt(client: ClientProfile): string {
   const platforms = client.platforms;
 
   const enabledPlatforms = (['instagram', 'tiktok', 'facebook', 'linkedin'] as const)
-    .filter((p) => platforms[p].enabled);
+    .filter((p) => platforms[p].enabled && platforms[p].accountId);
 
   const colorTable = brand.colors
     .map((c) => `- ${c.name} (${c.hex}): ${c.usage}`)
